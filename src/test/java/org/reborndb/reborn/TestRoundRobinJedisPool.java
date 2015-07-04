@@ -1,8 +1,8 @@
 /**
- * @(#)TestRoundRobinJedisPool.java, 2014-12-1. 
- * 
+ * @(#)TestRoundRobinJedisPool.java, 2014-12-1.
+ *
  * Copyright (c) 2015 Reborndb Org.
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
  * "Software"), to deal in the Software without restriction, including
@@ -10,10 +10,10 @@
  * distribute, sublicense, and/or sell copies of the Software, and to
  * permit persons to whom the Software is furnished to do so, subject to
  * the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be
  * included in all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
  * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
  * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
@@ -33,11 +33,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.concurrent.CountDownLatch;
 
-import org.apache.zookeeper.CreateMode;
-import org.apache.zookeeper.KeeperException;
-import org.apache.zookeeper.ZooDefs;
-import org.apache.zookeeper.ZooKeeper;
+import org.apache.zookeeper.*;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -100,10 +98,35 @@ public class TestRoundRobinJedisPool {
         });
     }
 
-    private void addNode(String name, int port, String state) throws IOException,
-            InterruptedException, KeeperException {
-        ZooKeeper zk = new ZooKeeper("localhost:" + zkPort, 5000, null);
+    public ZooKeeper connect(String host, int timeout) throws Exception {
+        final CountDownLatch connectedLatch = new CountDownLatch(1);
+
         try {
+            ZooKeeper zk = new ZooKeeper(host, timeout, new Watcher() {
+                @Override
+                public void process(WatchedEvent event) {
+                    if (event.getState() == Event.KeeperState.SyncConnected) {
+                        connectedLatch.countDown();
+                    }
+                }
+            });
+
+            if (ZooKeeper.States.CONNECTING == zk.getState()) {
+                connectedLatch.await();
+            }
+
+            return zk;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void addNode(String name, int port, String state) {
+        ZooKeeper zk = null;
+
+        try {
+            zk = connect("localhost:" + zkPort, 5000);
+
             if (zk.exists(zkPath, null) == null) {
                 zk.create(zkPath, null, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
             }
@@ -111,18 +134,33 @@ public class TestRoundRobinJedisPool {
             node.put("addr", "127.0.0.1:" + port);
             node.put("state", state);
             zk.create(zkPath + "/" + name, mapper.writer().writeValueAsBytes(node),
-                    ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+                            ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+        } catch (Exception e) {
+            // do nothing
         } finally {
-            zk.close();
+            try {
+                zk.close();
+            } catch (InterruptedException e) {
+                // do nothing
+            }
         }
     }
 
-    private void removeNode(String name) throws InterruptedException, KeeperException, IOException {
-        ZooKeeper zk = new ZooKeeper("localhost:" + zkPort, 5000, null);
+    private void removeNode(String name) {
+        ZooKeeper zk = null;
+
         try {
+            zk = connect("localhost:" + zkPort, 5000);
+
             zk.delete(zkPath + "/" + name, -1);
+        } catch (Exception e) {
+            // do nothing
         } finally {
-            zk.close();
+            try {
+                zk.close();
+            } catch (InterruptedException e) {
+                // do nothing
+            }
         }
     }
 
@@ -136,6 +174,7 @@ public class TestRoundRobinJedisPool {
         redis1.start();
         redis2 = new RedisServer(redisPort2);
         redis2.start();
+
         Thread.sleep(2000);
 
         jedis1 = new Jedis("localhost", redisPort1);
@@ -168,6 +207,7 @@ public class TestRoundRobinJedisPool {
             jedis.set("k1", "v1");
         }
         assertEquals("v1", jedis1.get("k1"));
+
         // fake node
         addNode("node2", 12345, "offline");
         Thread.sleep(3000);
