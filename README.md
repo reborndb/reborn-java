@@ -16,5 +16,5 @@ try (Jedis jedis = jedisPool.getResource()) {
 ```
 
 ##Note
-JDK7 is required to build and use jodis. If you want to use jodis with JDK6, you can copy the source files to your project, replace ThreadLocalRandom in BoundedExponentialBackoffRetryUntilElapsed and JDK7 specified grammar(maybe, not sure), and then compile with JDK6.
+JDK7 is required to build and use reborn-java. If you want to use reborn-java with JDK6, you can copy the source files to your project, replace ThreadLocalRandom in BoundedExponentialBackoffRetryUntilElapsed and JDK7 specified grammar(maybe, not sure), and then compile with JDK6.
 
